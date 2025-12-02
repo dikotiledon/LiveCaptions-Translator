@@ -1,9 +1,11 @@
-﻿using System.Net;
+﻿using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using LiveCaptionsTranslator.models;
 
 namespace LiveCaptionsTranslator.utils
@@ -27,15 +29,19 @@ namespace LiveCaptionsTranslator.utils
             { "MTranServer", MTranServer },
             { "Baidu", Baidu },
             { "LibreTranslate", LibreTranslate },
+            { "GenAI", GenAI },
         };
         public static readonly List<string> LLM_BASED_APIS = new()
         {
-            "Ollama", "OpenAI", "OpenRouter"
+            "Ollama", "OpenAI", "OpenRouter", "GenAI"
         };
         public static readonly List<string> NO_CONFIG_APIS = new()
         {
             "Google", "Google2"
         };
+
+        private static readonly object genaiLock = new();
+        private static readonly GenAIConversationState genaiState = new();
 
         public static Func<string, CancellationToken, Task<string>> TranslateFunction =>
             TRANSLATE_FUNCTIONS[Translator.Setting.ApiName];
@@ -606,6 +612,280 @@ namespace LiveCaptionsTranslator.utils
             }
             else
                 return $"[ERROR] Translation Failed: HTTP Error - {response.StatusCode}";
+        }
+
+        public static async Task<string> GenAI(string text, CancellationToken token = default)
+        {
+            var config = Translator.Setting["GenAI"] as GenAIConfig;
+            if (config == null)
+                return "[ERROR] GenAI configuration missing.";
+
+            client.DefaultRequestHeaders.Clear();
+
+            string cookieHeader = ResolveGenAICookie(config);
+            if (string.IsNullOrWhiteSpace(cookieHeader))
+                return "[ERROR] GenAI cookies not detected. Keep the GenAI portal open or paste cookies manually.";
+
+            string targetLanguage = Translator.Setting?.TargetLanguage ?? "en";
+            string prompt = string.Format(Prompt, targetLanguage);
+            string requestPayload = $"{prompt}\n\n🔤 {text} 🔤";
+
+            try
+            {
+                await EnsureGenAIChatAsync(config, cookieHeader, token);
+                string messageGuid = await SendGenAIMessageAsync(config, cookieHeader, requestPayload, token);
+                string assistantGuid = await WaitForGenAIResponseAsync(config, cookieHeader, messageGuid, token);
+                string rawContent = await FetchGenAIMessageAsync(config, cookieHeader, assistantGuid, token);
+
+                lock (genaiLock)
+                    genaiState.LastAssistantGuid = assistantGuid;
+
+                return string.IsNullOrWhiteSpace(rawContent)
+                    ? "[WARNING] GenAI returned an empty response."
+                    : StripHtml(rawContent).Trim();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lock (genaiLock)
+                {
+                    genaiState.ChatGuid = null;
+                    genaiState.LastAssistantGuid = null;
+                }
+                return $"[ERROR] GenAI Failed: {ex.Message}";
+            }
+        }
+
+        private static async Task EnsureGenAIChatAsync(GenAIConfig config, string cookieHeader, CancellationToken token)
+        {
+            lock (genaiLock)
+            {
+                if (!string.IsNullOrEmpty(genaiState.ChatGuid))
+                    return;
+            }
+
+            var requestBody = new
+            {
+                title = "LiveCaptions",
+                type = "chat",
+                clientType = config.ClientType,
+                fileUuids = Array.Empty<string>()
+            };
+
+            var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            using var request = CreateGenAIRequest(HttpMethod.Post, "/api/chat/v1/chats", config, cookieHeader, content);
+            var response = await client.SendAsync(request, token);
+            if (!response.IsSuccessStatusCode)
+                throw new Exception($"Failed to start GenAI chat ({response.StatusCode}).");
+
+            var result = JsonSerializer.Deserialize<GenAIChatResponse>(await response.Content.ReadAsStringAsync(token));
+            if (result == null || string.IsNullOrEmpty(result.guid))
+                throw new Exception("GenAI did not return a chat GUID.");
+
+            lock (genaiLock)
+            {
+                genaiState.ChatGuid = result.guid;
+                genaiState.LastAssistantGuid = null;
+            }
+        }
+
+        private static async Task<string> SendGenAIMessageAsync(GenAIConfig config, string cookieHeader, string contentText, CancellationToken token)
+        {
+            string? chatGuid;
+            string? parentGuid;
+            lock (genaiLock)
+            {
+                chatGuid = genaiState.ChatGuid;
+                parentGuid = genaiState.LastAssistantGuid;
+            }
+
+            if (string.IsNullOrEmpty(chatGuid))
+                throw new Exception("GenAI chat has not been initialized.");
+
+            var payload = new Dictionary<string, object?>
+            {
+                ["chatGuid"] = chatGuid,
+                ["messageType"] = "chat",
+                ["content"] = contentText,
+                ["attributes"] = new
+                {
+                    plugins = Array.Empty<string>(),
+                    mcpServers = Array.Empty<string>(),
+                    knowledge = Array.Empty<string>(),
+                    embeddingKnowledge = Array.Empty<string>(),
+                    codeInterpreters = false
+                },
+                ["fileUuids"] = Array.Empty<string>()
+            };
+
+            if (!string.IsNullOrEmpty(parentGuid))
+                payload["parentMessageGuid"] = parentGuid;
+
+            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var request = CreateGenAIRequest(HttpMethod.Post, "/api/chat/v1/messages", config, cookieHeader, content);
+            var response = await client.SendAsync(request, token);
+            if (!response.IsSuccessStatusCode)
+                throw new Exception($"GenAI refused the message ({response.StatusCode}).");
+
+            var messageStub = JsonSerializer.Deserialize<GenAIMessageStub>(await response.Content.ReadAsStringAsync(token));
+            if (messageStub == null || string.IsNullOrEmpty(messageStub.guid))
+                throw new Exception("GenAI did not return a message GUID.");
+
+            return messageStub.guid;
+        }
+
+        private static async Task<string> WaitForGenAIResponseAsync(GenAIConfig config, string cookieHeader, string messageGuid, CancellationToken token)
+        {
+            string? chatGuid;
+            lock (genaiLock)
+                chatGuid = genaiState.ChatGuid;
+
+            if (string.IsNullOrEmpty(chatGuid))
+                throw new Exception("GenAI chat has not been initialized.");
+
+            var payload = new
+            {
+                chatGuid,
+                messageGuid,
+                locale = config.Locale,
+                modelGuids = new[] { config.ModelGuid },
+                isArtifact = false
+            };
+
+            var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            using var request = CreateGenAIRequest(HttpMethod.Post, "/api/chat/v1/messages-response", config, cookieHeader, content);
+            request.Headers.Accept.Clear();
+            request.Headers.Accept.ParseAdd("text/event-stream");
+
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            if (!response.IsSuccessStatusCode)
+                throw new Exception($"GenAI stream failed ({response.StatusCode}).");
+
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            using var reader = new StreamReader(stream);
+
+            string? assistantGuid = null;
+
+            while (!reader.EndOfStream)
+            {
+                token.ThrowIfCancellationRequested();
+                string? line = await reader.ReadLineAsync();
+                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:"))
+                    continue;
+
+                string payloadLine = line[5..].Trim();
+                if (string.IsNullOrEmpty(payloadLine) || payloadLine == "[DONE]")
+                    continue;
+
+                GenAIEvent? evt;
+                try
+                {
+                    evt = JsonSerializer.Deserialize<GenAIEvent>(payloadLine);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (evt == null)
+                    continue;
+
+                if (string.Equals(evt.status, "ERROR", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(evt.response_code, "R50002", StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("GenAI reported an error (R50002).");
+
+                if (!string.IsNullOrEmpty(evt.guid))
+                    assistantGuid = evt.guid;
+            }
+
+            if (string.IsNullOrEmpty(assistantGuid))
+                throw new Exception("GenAI stream completed without a response.");
+
+            return assistantGuid;
+        }
+
+        private static async Task<string> FetchGenAIMessageAsync(GenAIConfig config, string cookieHeader, string assistantGuid, CancellationToken token)
+        {
+            using var request = CreateGenAIRequest(HttpMethod.Get, $"/api/chat/v1/messages/{assistantGuid}", config, cookieHeader);
+            var response = await client.SendAsync(request, token);
+            if (!response.IsSuccessStatusCode)
+                throw new Exception($"Failed to fetch GenAI message ({response.StatusCode}).");
+
+            var message = JsonSerializer.Deserialize<GenAIMessageResponse>(await response.Content.ReadAsStringAsync(token));
+            if (message == null)
+                throw new Exception("GenAI message payload missing.");
+
+            if (string.Equals(message.status, "ERROR", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(message.responseCode, "R50002", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("GenAI reported an error while finalizing the message.");
+
+            return message.content ?? string.Empty;
+        }
+
+        private static HttpRequestMessage CreateGenAIRequest(HttpMethod method, string path, GenAIConfig config, string cookieHeader, HttpContent? content = null)
+        {
+            string baseUrl = TextUtil.NormalizeUrl(config.ApiBaseUrl);
+            if (!path.StartsWith('/'))
+                path = "/" + path;
+
+            var request = new HttpRequestMessage(method, baseUrl + path)
+            {
+                Content = content
+            };
+
+            request.Headers.Add("Cookie", cookieHeader);
+            request.Headers.Add("Accept", "application/json");
+
+            return request;
+        }
+
+        private static string ResolveGenAICookie(GenAIConfig config)
+        {
+            if (config.UseCookieBridge && !string.IsNullOrWhiteSpace(CookieBridge.LatestCookieHeader))
+                return CookieBridge.LatestCookieHeader;
+            return config.CookieHeader;
+        }
+
+        private static string StripHtml(string html)
+        {
+            if (string.IsNullOrEmpty(html))
+                return string.Empty;
+            string noTags = Regex.Replace(html, "<[^>]+>", " ");
+            return Regex.Replace(noTags, @"\s+", " ");
+        }
+
+        private class GenAIConversationState
+        {
+            public string? ChatGuid { get; set; }
+            public string? LastAssistantGuid { get; set; }
+        }
+
+        private class GenAIChatResponse
+        {
+            public string? guid { get; set; }
+        }
+
+        private class GenAIMessageStub
+        {
+            public string? guid { get; set; }
+        }
+
+        private class GenAIEvent
+        {
+            public string? guid { get; set; }
+            public string? response_code { get; set; }
+            public string? status { get; set; }
+        }
+
+        private class GenAIMessageResponse
+        {
+            public string? guid { get; set; }
+            public string? content { get; set; }
+            public string? status { get; set; }
+            public string? responseCode { get; set; }
         }
     }
 

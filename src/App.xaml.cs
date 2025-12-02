@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 
+using LiveCaptionsTranslator.models;
 using LiveCaptionsTranslator.utils;
 
 namespace LiveCaptionsTranslator
@@ -10,6 +11,17 @@ namespace LiveCaptionsTranslator
         {
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             Translator.Setting?.Save();
+
+            var genaiConfig = Translator.Setting?["GenAI"] as GenAIConfig;
+            if (genaiConfig != null)
+            {
+                CookieBridge.Start(genaiConfig.UseCookieBridge ? genaiConfig.BridgePort : null);
+                CookieBridge.CookiesUpdated += header =>
+                {
+                    if (genaiConfig.UseCookieBridge)
+                        genaiConfig.CookieHeader = header;
+                };
+            }
 
             Task.Run(() => Translator.SyncLoop());
             Task.Run(() => Translator.TranslateLoop());
@@ -23,6 +35,8 @@ namespace LiveCaptionsTranslator
                 LiveCaptionsHandler.RestoreLiveCaptions(Translator.Window);
                 LiveCaptionsHandler.KillLiveCaptions(Translator.Window);
             }
+
+            CookieBridge.Stop();
         }
     }
 }

@@ -182,7 +182,8 @@ namespace LiveCaptionsTranslator.models
                 { "Youdao", [new YoudaoConfig()] },
                 { "Baidu", [new BaiduConfig()] },
                 { "MTranServer", [new MTranServerConfig()] },
-                { "LibreTranslate", [new LibreTranslateConfig()] }
+                { "LibreTranslate", [new LibreTranslateConfig()] },
+                { "GenAI", [new GenAIConfig()] }
             };
             configIndices = new Dictionary<string, int>
             {
@@ -195,7 +196,8 @@ namespace LiveCaptionsTranslator.models
                 { "Youdao", 0 },
                 { "Baidu", 0 },
                 { "MTranServer", 0 },
-                { "LibreTranslate", 0 }
+                { "LibreTranslate", 0 },
+                { "GenAI", 0 }
             };
         }
 

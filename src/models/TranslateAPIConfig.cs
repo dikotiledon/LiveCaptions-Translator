@@ -416,4 +416,85 @@ namespace LiveCaptionsTranslator.models
             public string translatedText { get; set; }
         }
     }
+
+    public class GenAIConfig : TranslateAPIConfig
+    {
+        private string apiBaseUrl = "https://genai.sec.samsung.net";
+        private string modelGuid = "0198f11e-ceab-71c3-8fb1-d077d6331843";
+        private string locale = "en";
+        private string clientType = "portal";
+        private bool useCookieBridge = true;
+        private int bridgePort = 17891;
+        private string cookieHeader = string.Empty;
+
+        public string ApiBaseUrl
+        {
+            get => apiBaseUrl;
+            set
+            {
+                apiBaseUrl = value;
+                OnPropertyChanged(nameof(ApiBaseUrl));
+            }
+        }
+
+        public string ModelGuid
+        {
+            get => modelGuid;
+            set
+            {
+                modelGuid = value;
+                OnPropertyChanged(nameof(ModelGuid));
+            }
+        }
+
+        public string Locale
+        {
+            get => locale;
+            set
+            {
+                locale = value;
+                OnPropertyChanged(nameof(Locale));
+            }
+        }
+
+        public string ClientType
+        {
+            get => clientType;
+            set
+            {
+                clientType = value;
+                OnPropertyChanged(nameof(ClientType));
+            }
+        }
+
+        public bool UseCookieBridge
+        {
+            get => useCookieBridge;
+            set
+            {
+                useCookieBridge = value;
+                OnPropertyChanged(nameof(UseCookieBridge));
+            }
+        }
+
+        public int BridgePort
+        {
+            get => bridgePort;
+            set
+            {
+                bridgePort = value;
+                OnPropertyChanged(nameof(BridgePort));
+            }
+        }
+
+        public string CookieHeader
+        {
+            get => cookieHeader;
+            set
+            {
+                cookieHeader = value;
+                OnPropertyChanged(nameof(CookieHeader));
+            }
+        }
+    }
 }

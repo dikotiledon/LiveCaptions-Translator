@@ -167,6 +167,20 @@
                                 <ui:TextBlock VerticalAlignment="Center" Text="LibreTranslate" />
                             </StackPanel>
                         </ui:Button>
+
+                        <ui:Button
+                            x:Name="GenAIButton"
+                            Margin="10,5,5,10"
+                            Padding="10"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            Background="Transparent"
+                            Click="NavigationButton_Click"
+                            Tag="GenAI">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:TextBlock VerticalAlignment="Center" Text="GenAI" />
+                            </StackPanel>
+                        </ui:Button>
                     </StackPanel>
                 </ScrollViewer>
             </Border>
@@ -1106,6 +1120,95 @@
                                                     Text="{Binding [LibreTranslate].ApiKey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                             </StackPanel>
                                         </Grid>
+                                    </StackPanel>
+                                </ui:Card>
+                            </StackPanel>
+
+                            <StackPanel x:Name="GenAISection" Margin="20">
+                                <ui:TextBlock
+                                    Margin="10"
+                                    FontSize="20"
+                                    FontWeight="Medium"
+                                    Text="GenAI" />
+
+                                <ui:Card Padding="15">
+                                    <StackPanel Margin="10,0,10,0" Orientation="Vertical">
+                                        <ui:TextBlock Margin="0,0,0,10" TextWrapping="Wrap">
+                                            <Run Text="GenAI uses your signed-in browser session. Install the companion extension and keep the corporate SSO tab available." />
+                                        </ui:TextBlock>
+
+                                        <Grid Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Margin="5" Orientation="Vertical">
+                                                <ui:TextBlock Text="API Base URL" />
+                                                <ui:TextBox
+                                                    Margin="0,5,0,0"
+                                                    Text="{Binding [GenAI].ApiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="5" Orientation="Vertical">
+                                                <ui:TextBlock Text="Model Guid" />
+                                                <ui:TextBox
+                                                    Margin="0,5,0,0"
+                                                    Text="{Binding [GenAI].ModelGuid, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Margin="5" Orientation="Vertical">
+                                                <ui:TextBlock Text="Locale" />
+                                                <ui:TextBox
+                                                    Margin="0,5,0,0"
+                                                    Text="{Binding [GenAI].Locale, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="5" Orientation="Vertical">
+                                                <ui:TextBlock Text="Client Type" />
+                                                <ui:TextBox
+                                                    Margin="0,5,0,0"
+                                                    Text="{Binding [GenAI].ClientType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Margin="0,0,0,10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <StackPanel Margin="5" Orientation="Vertical">
+                                                <ui:TextBlock Text="Use Local Bridge" />
+                                                <ui:ToggleSwitch
+                                                    Margin="0,5,0,0"
+                                                    IsChecked="{Binding [GenAI].UseCookieBridge, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                            <StackPanel Margin="5" Grid.Column="1" Orientation="Vertical">
+                                                <ui:TextBlock Text="Bridge Port" />
+                                                <ui:NumberBox
+                                                    Margin="0,5,0,0"
+                                                    Width="140"
+                                                    Minimum="1024"
+                                                    Maximum="65535"
+                                                    Value="{Binding [GenAI].BridgePort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <StackPanel Margin="5,0,5,0" Orientation="Vertical">
+                                            <ui:TextBlock Text="Manual Cookie Header" />
+                                            <ui:TextBox
+                                                Margin="0,5,0,0"
+                                                AcceptsReturn="True"
+                                                Height="80"
+                                                TextWrapping="Wrap"
+                                                Text="{Binding [GenAI].CookieHeader, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
                                     </StackPanel>
                                 </ui:Card>
                             </StackPanel>
